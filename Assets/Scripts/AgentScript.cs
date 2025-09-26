@@ -6,46 +6,49 @@ using UnityEngine.SceneManagement;
 
 public class AgentScript : MonoBehaviour
 {
-
     NavMeshAgent agent;
     [SerializeField] Transform[] patrolPoints;
     [SerializeField] Animator anim;
     [SerializeField] float minDistance = 0.5f;
 
-    Transform player;
+    [SerializeField] Transform player;
+    [SerializeField] Transform eyePoint;
+
     int currentPatrolIndex = 0;
     float velocity;
     float loseTimer = 0f;
     bool chasing = false;
 
-    [SerializeField] float rayDistance = 2f;
+    [Header("Detección")]
+    [SerializeField] float rayDistance = 5f;
     [SerializeField] LayerMask detectionMask;
     [SerializeField] float fieldOfView = 45f;
     [SerializeField] float losePlayerTime = 2f;
-
+    [SerializeField] int raysInCone = 5;
 
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
-        player = GameObject.FindGameObjectWithTag("Player")?.transform;
+        if (player == null)
+            player = GameObject.FindGameObjectWithTag("Player")?.transform;
+        if (eyePoint == null)
+            eyePoint = transform; // si no hay ojo asignado, usa la base
     }
 
-    // Update is called once per frame
     void Update()
     {
         if (chasing)
-        {
             Chase();
-        }
         else
         {
             Patrol();
             DetectPlayer();
         }
 
-        // Actualizar animación de velocidad
+        // Animación de velocidad
         velocity = agent.velocity.magnitude;
-        anim.SetFloat("Speed", velocity);
+        if (anim != null)
+            anim.SetFloat("Speed", velocity);
     }
 
     void Patrol()
@@ -55,9 +58,7 @@ public class AgentScript : MonoBehaviour
         agent.destination = patrolPoints[currentPatrolIndex].position;
 
         if (!agent.pathPending && agent.remainingDistance <= minDistance)
-        {
             currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
-        }
     }
 
     void Chase()
@@ -67,10 +68,7 @@ public class AgentScript : MonoBehaviour
         agent.destination = player.position;
 
         if (agent.remainingDistance <= 1.2f)
-        {
-            Debug.Log("Jugador atrapado!");
             SceneManager.LoadScene("GameOverScene");
-        }
 
         if (!CanSeePlayer())
         {
@@ -78,8 +76,8 @@ public class AgentScript : MonoBehaviour
             if (loseTimer >= losePlayerTime)
             {
                 loseTimer = 0f;
-                chasing = false; // vuelve a patrullar
-                currentPatrolIndex = Random.Range(0, patrolPoints.Length); // arranca desde cualquier punto
+                chasing = false;
+                currentPatrolIndex = Random.Range(0, patrolPoints.Length);
             }
         }
         else
@@ -93,30 +91,51 @@ public class AgentScript : MonoBehaviour
         if (player == null) return;
 
         if (CanSeePlayer())
-        {
             chasing = true;
-        }
     }
 
     bool CanSeePlayer()
     {
-        Vector3 dirToPlayer = (player.position - transform.position).normalized;
+        if (player == null) return false;
 
-        // Chequeo ángulo de visión
-        if (Vector3.Angle(transform.forward, dirToPlayer) < fieldOfView)
+        Vector3 dirToPlayer = (player.position - eyePoint.position).normalized;
+
+        for (int i = -raysInCone; i <= raysInCone; i++)
         {
+            float angle = (fieldOfView / raysInCone) * i;
+            Vector3 rayDir = Quaternion.Euler(0, angle, 0) * transform.forward;
+
             RaycastHit hit;
-            if (Physics.Raycast(transform.position + Vector3.up, dirToPlayer, out hit, rayDistance, detectionMask))
+            if (Physics.Raycast(eyePoint.position, rayDir, out hit, rayDistance, detectionMask))
             {
                 if (hit.collider.CompareTag("Player"))
-                {
-                    Debug.DrawRay(transform.position + Vector3.up, dirToPlayer * rayDistance, Color.red);
                     return true;
-                }
             }
         }
 
-        Debug.DrawRay(transform.position + Vector3.up, transform.forward * rayDistance, Color.green);
         return false;
+    }
+
+    // --- Dibujo de Gizmos ---
+    private void OnDrawGizmosSelected()
+    {
+        if (eyePoint == null)
+            eyePoint = transform;
+
+        Gizmos.color = Color.yellow;
+        // Dibujar rayos del cono de visión
+        for (int i = -raysInCone; i <= raysInCone; i++)
+        {
+            float angle = (fieldOfView / raysInCone) * i;
+            Vector3 rayDir = Quaternion.Euler(0, angle, 0) * transform.forward;
+            Gizmos.DrawRay(eyePoint.position, rayDir * rayDistance);
+        }
+
+        // Dibujar línea hacia el jugador si lo ve
+        if (player != null && CanSeePlayer())
+        {
+            Gizmos.color = Color.red;
+            Gizmos.DrawLine(eyePoint.position, player.position);
+        }
     }
 }
